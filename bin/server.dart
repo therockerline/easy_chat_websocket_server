@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:args/args.dart';
 import 'package:shelf/shelf.dart' as shelf;
 import 'package:shelf/shelf_io.dart' as io;
 import 'package:shelf_web_socket/shelf_web_socket.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 // For Google Cloud Run, set _hostname to '0.0.0.0'.
 const _hostname = 'localhost';
@@ -46,22 +48,25 @@ void main(List<String> args) async {
         switch (sm.type) {
           case 'login': {
             sm.user.websocket = webSocket;
-            users.add(sm.user);
-            Future.delayed(Duration(seconds: 3), () {
-              users.remove(sm.user);
-              notifyNewUser();
-            });
+            int indexOf = users.isNotEmpty ? users.indexWhere((element) => element.nickname == sm.user.nickname) : null;
+            if(indexOf==null || indexOf == -1) {
+              users.add(sm.user);
+            }else{
+              users[indexOf].websocket = webSocket;
+            }
+            print(['login', sm.user.nickname, webSocket.hashCode]);
             notifyNewUser();
           }break;
           case 'message': {
-            var socket = users.firstWhere((element) => element.nickname == sm.user.nickname).websocket;
-            var from = users.firstWhere((element) => element.websocket == webSocket);
-            sm.user = from;
+            WebSocketChannel socket = users.firstWhere((element) => element.nickname == sm.user.nickname).websocket;
+            User from = users.firstWhere((element) => element.websocket.hashCode == webSocket.hashCode);
             var message = {
               'type': 'message',
               'user': from.toJson(),
               'message': sm.message
             };
+            print(['send', sm.message, 'from ${sm.user.nickname}', 'to ${from.nickname}']);
+            sm.user = from;
             socket.sink.add(jsonEncode(message));
           }break;
         }
@@ -83,6 +88,7 @@ void notifyNewUser() {
     'userCollection': users.map((e) => e.toJson()).toList()
   };
   users.forEach((element) {
+    print(['notify to',element.nickname, element.websocket.hashCode, message]);
     element.websocket.sink.add(jsonEncode(message));
   });
 }
@@ -91,7 +97,7 @@ shelf.Response _echoRequest(shelf.Request request) =>
     shelf.Response.ok('Request for "${request.url}"');
 
 class User {
-    dynamic websocket;
+    WebSocketChannel websocket;
     String nickname;
     int port;
 
