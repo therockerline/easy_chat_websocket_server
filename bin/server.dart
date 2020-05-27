@@ -1,7 +1,5 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 import 'package:args/args.dart';
 import 'package:shelf/shelf.dart' as shelf;
@@ -9,9 +7,18 @@ import 'package:shelf/shelf_io.dart' as io;
 import 'package:shelf_web_socket/shelf_web_socket.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'chat/char_service.dart';
+
 // For Google Cloud Run, set _hostname to '0.0.0.0'.
 const _hostname = 'localhost';
-List<User> users = [];
+
+enum SocketMessageTypes {
+  login,
+  logout,
+  userUpdate,
+  message,
+  received
+}
 
 void main(List<String> args) async {
   var parser = ArgParser()..addOption('port', abbr: 'p');
@@ -40,56 +47,42 @@ void main(List<String> args) async {
 
 
 
-  var handler = webSocketHandler((webSocket) {
+  var handler = webSocketHandler((WebSocketChannel webSocket) {
     webSocket.stream.listen((message) {
-      //webSocket.sink.add(message);
       var sm = SocketMessage.fromJson(jsonDecode(message) as Map<String, dynamic>);
+      var received = {
+        'type':SocketMessageTypes.received.index,
+        'responseForType': sm.type.index
+      };
+      webSocket.sink.add(jsonEncode(received));
       if(sm!=null) {
         switch (sm.type) {
-          case 'login': {
-            sm.user.websocket = webSocket;
-            int indexOf = users.isNotEmpty ? users.indexWhere((element) => element.nickname == sm.user.nickname) : null;
-            if(indexOf==null || indexOf == -1) {
-              users.add(sm.user);
-            }else{
-              users[indexOf].websocket = webSocket;
-            }
-            print(['login', sm.user.nickname, webSocket.hashCode]);
-            notifyNewUser();
+          case SocketMessageTypes.login: {
+            ChatService.userLogin(webSocket, sm.user);
           }break;
-          case 'message': {
-            WebSocketChannel socket = users.firstWhere((element) => element.nickname == sm.user.nickname).websocket;
-            User from = users.firstWhere((element) => element.websocket.hashCode == webSocket.hashCode);
-            var message = {
-              'type': 'message',
-              'user': from.toJson(),
-              'message': sm.message
-            };
-            print(['send', sm.message, 'from ${sm.user.nickname}', 'to ${from.nickname}']);
-            sm.user = from;
-            socket.sink.add(jsonEncode(message));
+          case SocketMessageTypes.message: {
+            ChatService.sendMessage(webSocket, sm);
           }break;
+          case SocketMessageTypes.userUpdate:
+            // TODO: Handle this case.
+            break;
+          case SocketMessageTypes.received:
+            // TODO: Handle this case.
+            break;
+          case SocketMessageTypes.logout:
+            // TODO: Handle this case.
+            break;
         }
       }else {
         print(message);
         //webSocket.sink.add('unable to parse message');
       }
     });
-  },pingInterval: Duration(milliseconds: 1000));
+  }
+  );
 
   await io.serve(handler, 'localhost', 8080).then((server) {
     print('Serving at ws://${server.address.host}:${server.port}');
-  });
-}
-
-void notifyNewUser() {
-  var message = {
-    'type': 'userUpdate',
-    'userCollection': users.map((e) => e.toJson()).toList()
-  };
-  users.forEach((element) {
-    print(['notify to',element.nickname, element.websocket.hashCode, message]);
-    element.websocket.sink.add(jsonEncode(message));
   });
 }
 
@@ -119,23 +112,25 @@ class User {
 }
 
 class SocketMessage {
-    String type;
+    SocketMessageTypes type;
     User user;
     String message;
-    SocketMessage({this.type, this.user, this.message});
+    WebSocketChannel channel;
+    SocketMessage({this.type, this.user, this.message, this.channel});
 
     factory SocketMessage.fromJson(Map<String, dynamic> json) {
       print(json);
-      switch (json['type'] as String){
-        case 'login': return SocketMessage.fromLoginJson(json);
-        case 'message': return SocketMessage.fromMessageJson(json);
+      switch (SocketMessageTypes.values[json['type']]){
+        case SocketMessageTypes.login: return SocketMessage.fromLoginJson(json);
+        case SocketMessageTypes.message: return SocketMessage.fromMessageJson(json);
         default: return null;
       }
     }
 
     factory SocketMessage.fromLoginJson(Map<String, dynamic> json){
       return SocketMessage(
-          type: json['type'],
+          type: SocketMessageTypes.values[json['type']],
+          channel: json['channel'],
           user: User.fromJson(json['user'] as Map<String, dynamic>)
       );
     }
@@ -143,7 +138,7 @@ class SocketMessage {
     factory SocketMessage.fromMessageJson(Map<String, dynamic> json){
       print([json['message'], json['type'], json['target']]);
       var sm = SocketMessage(
-          type: json['type'],
+          type: SocketMessageTypes.values[json['type']],
           message: json['message'],
           user: User.fromJson(json['target'] as Map<String, dynamic>),
       );
