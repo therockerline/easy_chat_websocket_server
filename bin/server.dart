@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -71,6 +72,7 @@ void main(List<String> args) async {
             break;
           case SocketMessageTypes.logout:
             // TODO: Handle this case.
+            ChatService.userLogout(webSocket, sm.user);
             break;
         }
       }else {
@@ -78,10 +80,13 @@ void main(List<String> args) async {
         //webSocket.sink.add('unable to parse message');
       }
     });
+    Timer.periodic(Duration(seconds: 5), (timer) {
+      ChatService.notifyLoggedUsersToAll();
+    });
   }
   );
 
-  await io.serve(handler, 'localhost', 8080).then((server) {
+  await io.serve(handler, '127.0.0.1', 8080).then((server) {
     print('Serving at ws://${server.address.host}:${server.port}');
   });
 }
@@ -93,20 +98,21 @@ class User {
     WebSocketChannel websocket;
     String nickname;
     int port;
+    bool isOnline;
 
-    User({this.nickname, this.port});
+    User({this.nickname, this.isOnline});
 
     factory User.fromJson(Map<String, dynamic> json) {
         return User(
-            nickname: json['nickname'],
-            port: json['port'],
+          nickname: json['nickname'],
+          isOnline: json['isOnline'] as bool,
         );
     }
 
     Map<String, dynamic> toJson() {
         final Map<String, dynamic> data = new Map<String, dynamic>();
-        data['nickname'] = this.nickname;
-        data['port'] = this.port;
+        data['nickname'] = nickname;
+        data['isOnline'] = isOnline;
         return data;
     }
 }
@@ -121,6 +127,7 @@ class SocketMessage {
     factory SocketMessage.fromJson(Map<String, dynamic> json) {
       print(json);
       switch (SocketMessageTypes.values[json['type']]){
+        case SocketMessageTypes.logout:
         case SocketMessageTypes.login: return SocketMessage.fromLoginJson(json);
         case SocketMessageTypes.message: return SocketMessage.fromMessageJson(json);
         default: return null;

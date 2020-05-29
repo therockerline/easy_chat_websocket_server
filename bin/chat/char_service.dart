@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -9,14 +10,15 @@ class ChatService{
 
   static void userLogin(WebSocketChannel webSocket, User user){
     user.websocket = webSocket;
+    user.isOnline = true;
     int indexOf = users.isNotEmpty ? users.indexWhere((element) => element.nickname == user.nickname) : null;
     if(indexOf==null || indexOf == -1) {
       users.add(user);
     }else{
-      users[indexOf].websocket = webSocket;
+      users[indexOf] = user;
     }
-    print(['login', user.nickname, webSocket.hashCode]);
-    notifyNewUserConnection();
+    print(['login found at $indexOf', user.nickname, webSocket.hashCode]);
+    notifyLoggedUsersToAll();
   }
 
   static void sendMessage(WebSocketChannel webSocket, SocketMessage sm){
@@ -38,15 +40,28 @@ class ChatService{
     });*/
   }
 
-  static void notifyNewUserConnection(){
+  static void notifyLoggedUsersToAll(){
+    users.forEach((element) {
+      notifyLoggedUserTo(element);
+    });
+  }
+
+  static void notifyLoggedUserTo(User user){
     var message = {
       'type': SocketMessageTypes.userUpdate.index,
       'userCollection': users.map((e) => e.toJson()).toList()
     };
-    users.forEach((element) {
-      print(['notify to',element.nickname, element.websocket.hashCode, message]);
-      element.websocket.sink.add(jsonEncode(message));
-    });
+    print(['notify to',user.nickname, user.websocket.hashCode, message]);
+    user.websocket.sink.add(jsonEncode(message));
+  }
+
+  static void userLogout(WebSocketChannel webSocket, User user) {
+    int indexOf = users.isNotEmpty ? users.indexWhere((element) => element.nickname == user.nickname) : null;
+    if(!(indexOf==null || indexOf == -1)) {
+      users[indexOf].isOnline=false;
+    }
+    print(['logout', user.nickname, webSocket.hashCode]);
+    notifyLoggedUsersToAll();
   }
 
 }
